@@ -1,0 +1,655 @@
+// Texturing
+
+const int Steps = 200;      // Number of steps
+const float Epsilon = 0.01; // Marching epsilon
+
+// Structure for objects
+// v : Field value
+// i : Texture index
+struct V {
+    float v; 
+    int i;
+};
+
+// Structure for texture
+// c : Color
+// s : Specular
+struct T {
+vec3 c;
+float s;
+};
+
+//Animations
+
+float Surface( in vec2 p )
+{
+	return 1.5*cos(p.y/1.5+iTime)-1.0;
+} 
+
+// Implicit surface defining the terrain
+// p : Point
+float ImplicitTerrain(in vec3 p)
+{
+    float z = Surface( p.xy );
+    float h = (p.z - z)/2.0; // Lipschitz is defined as a constant 2.0
+    return h;
+}
+
+
+float SurfaceMer( in vec2 p )
+{
+	return 0.5*cos(p.y/1.5+iTime*2.)-1.0;
+} 
+
+// Implicit surface defining the terrain
+// p : Point
+float ImplicitMer(in vec3 p)
+{
+    float z = SurfaceMer( p.xy );
+    float h = (p.z - z)/2.0; // Lipschitz is defined as a constant 2.0
+    return h;
+}
+
+float SurfaceBalle( in vec2 p )
+{
+	return 2.5*sin(p.y/2.+iTime*3.)-3.0;
+} 
+
+// Implicit surface defining the terrain
+// p : Point
+float ImplicitBalle(in vec3 p)
+{
+    float z = SurfaceBalle( p.xy );
+    float h = (p.z - z-3.5)/2.; // Lipschitz is defined as a constant 2.0
+    return h;
+}
+
+vec2 circleT(vec2 p, float r)
+{
+    float angle = iTime*3.;
+    vec2 pos = vec2(r, angle);
+    vec2 position = p + vec2(pos.x * cos(pos.y), pos.x * sin(pos.y));
+    return position;
+}
+
+// Primitive functions -----------------------------------------------------------------------------------
+
+// Sphere 
+// p : point
+// c : center 
+// r : radius
+V Sphere(vec3 p, vec3 c,float r, int index)
+{
+  return V(length(p-c)-r, index);
+ 
+}
+
+// Plane 
+// p : point
+// n : Normal of plane
+// o : Point on plane
+V Plane(vec3 p, vec3 n, vec3 o,int index)
+{
+    return V(dot((p-o),n),index);
+}
+
+// Union
+// a : field function of left sub-tree
+// b : field function of right sub-tree
+V Union(V a,V b)
+{
+    if (a.v<b.v)
+        return V(a.v,a.i);
+    else 
+    {
+        return V(b.v,b.i);
+    }
+}
+
+// Intersection, preserve the index of first object
+// a, b : field function of left and right sub-trees
+V Intersection(V a,V b)
+{
+    if (a.v>b.v)
+    {
+        return V(a.v,a.i);
+    }
+    else 
+    {
+        return V(b.v,a.i);
+    }
+}
+
+
+
+//capsule
+V Capsule(vec3 a, vec3 b, float r, vec3 p, int index)
+{
+    if(dot(p-a,(b-a)/length(b-a))<0.0){
+      return V(length(p-a)-r, index);
+    }
+    else if(dot(p-b,(b-a)/length(b-a))>0.0){
+      return V(length(p-b)-r, index);
+    }else {
+    float aq=dot(p-a,(b-a)/length(b-a));
+    float l=sqrt(dot(p-a,p-a)-aq*aq);
+    return V(l-r, index);
+    }
+}
+
+//Cylindre
+V Cylindre(vec3 p, vec3 a , vec3 b , float r, int index){
+    V dc=Capsule (a,b,r,p, index);
+    V e= Intersection ( dc, Plane ( p,(a-b)/length(b-a),a+vec3(0.0,0.0,0.0), index));
+    V f= Intersection ( dc,Plane(p,(b-a)/length(b-a),b+vec3(0,0,0), index));
+    return Intersection(e,f);
+}
+
+//Torus
+float Torus(vec3 p , vec2 r){
+    float x =length(p.xz)-r.x;
+    return length(vec2(x,p.y))-r.y;
+}
+
+//Cube
+V Cube (vec3 p, vec3 o, float r, int index) {
+    return 
+    Intersection (
+    Plane (p,vec3(1.0,0.0,0.0),o+vec3(r,0.0,0.0),index),
+    Intersection (
+    Plane (p,vec3(-1.0,0.0,0.0),o+vec3(-r,0.0,0.0),index),
+    Intersection (Plane (p,vec3(0.0,1.0,0.0),o+vec3(0.0,r,0.0), index),
+    Intersection (Plane (p,vec3(0.0,-1.0,0.0),o+vec3(0.0,-r,0.0), index),
+    Intersection (Plane (p,vec3(0.0,0.0,1.0),o+vec3(0.0,0.0,r), index),
+    Plane (p,vec3(0.0,0.0,-1.0),o+vec3(0.0,0.0,-r),index))))));
+}
+
+//demiplane
+V DemiP(vec3 p, vec3 o, float r, int index)
+{
+    float a = ImplicitMer(p);
+    
+    
+    
+    return Intersection (
+    Plane (p, vec3 (0.,-0.3,a+5.),o+vec3(r,0.0,0.0),index),
+    Plane (p,vec3(0.0,-1.0,0.0),o+vec3(r,0.0,0.0),index));
+}
+
+//prisme base carre
+V Prisme (vec3 p, vec3 o, float r, float h, int index)
+{
+ return   Intersection (Plane (p,vec3(0.0,h,dot(h,0.5)),o+vec3(r,0.0,0.0),index), 
+          Intersection (Plane (p,vec3(0.0,-h,dot(h,0.5)),o+vec3(r,0.0,0.0), index),
+          Intersection (Plane (p,vec3(h,0.0,dot(h,0.5)),o+vec3(r,0.0,0.0),index),
+          Intersection(Plane(p,vec3(0,0,-h),o+vec3(0,0.0,-r), index), 
+          (Plane (p,vec3(-h,0,dot(h,0.5)),o+vec3(r,0.0,0.0), index))
+         ))));
+}
+
+
+//prisme base carre
+V PrismeC (vec3 p, vec3 o, float r, float h, int index)
+{
+ return   Intersection (Plane (p,vec3(0.0,h,dot(-h,0.5)),o+vec3(r,0.0,0.0), index), 
+          Intersection (Plane (p,vec3(0.0,-h,dot(-h,0.5)),o+vec3(r,0.0,0.0), index),
+          Intersection (Plane (p,vec3(h,0.0,dot(-h,0.5)),o+vec3(r,0.0,0.0), index),
+          Intersection(Plane(p,vec3(0,0,h),o+vec3(0,0.0,r),index), 
+          (Plane (p,vec3(-h,0,dot(-h,0.5)),o+vec3(r,0.0,0.0), index))
+         ))));
+ }             
+              
+       
+V Clessidre(vec3 p, vec3 o, float r, float h, int index)
+{
+    return Union(Prisme (p, o, r, h, index),PrismeC(p, o-vec3(0,0,5), r, h, index));
+}
+
+V Gemme(vec3 p, vec3 o, float r, float h, int index)
+{
+    return Union(Prisme (p, o, r, h,index),PrismeC(p-vec3(0,0,dot(-r,2.0)), o, r, h, index));
+}
+
+           
+              
+              
+//prisme base triangulaire
+V PrismeT (vec3 p, vec3 o, float r, int index)
+{
+ return   Intersection (Plane (p,vec3(0.866,1,0.5),o+vec3(r,0.0,0.0), index), 
+          Intersection (Plane (p,vec3(0.866,-1,0.5),o+vec3(r,0.0,0.0), index),
+          Intersection (Plane (p,vec3(-0.866,0,0.5),o+vec3(r,0.0,0.0), index),
+          (Plane (p,vec3(0,0,-0.6),o+vec3(r,0.0,-10), index)
+         ))));
+              
+              }
+              
+              
+
+                  
+             
+// Boule
+// p : point
+// c : center of skeleton
+// r : radius
+V BouleF(vec3 p, vec3 c,float r, vec3 d, int index)
+{
+  return Intersection (Plane(p,d,c, index),V(length(p-c)-r, index));
+  //return Plane(p,vec3(0,-1,0),vec3(0,0.0,-15.0));
+ 
+}      
+
+
+//0 damier     v
+//1 arbre1     v
+//2 arbre2     v
+//3 eau        v
+//4 sable      v
+//5 nuages     v
+//6 couleurs   v
+//
+
+// Potential field of the object
+// p : point
+V object(vec3 p)
+{
+  vec2 pos = circleT(p.xy, 1.);
+  float b = SurfaceBalle(p.xy);
+  V v=Sphere(p,vec3(-2.+sin(iTime),2,20.),8.,5);
+  v=Union(v, Sphere(p,vec3(2.+cos(iTime),2.,20.+cos(iTime)),8.,5));
+  v=Union(v, Sphere(p,vec3(6.+sin(iTime),2.,20.),6.,5));
+  v=Union(v,Plane(p,(vec3(0.0,0.0,1.0)),vec3(0.0,0.0,-10.0),4));
+  v=Union(v,DemiP(p,vec3(0.,0.,-10.),2.,3));
+  v=Union(v,Cube(p,vec3(10.,-15.,-13.),5.,2));
+  v=Union(v,Cube(p,vec3(-5.,-15.,-13.),5.,2));
+  v=Union(v,Cube(p,vec3(-20.,-15.,-13.),5.,2));
+  v=Union(v,Cube(p,vec3(-5.,-15.,-11.),3.,0));
+  v=Union(v, Sphere(p,vec3(pos.x*2.+3.,pos.y*2.+14.,-7.),0.5,6));
+  v=Union(v, Sphere(p,vec3(-2,-13,-7.5),0.5,6));
+  v=Union(v,Capsule(vec3(10,-10,10),vec3(10,0,-20),0.5,p,1));
+  v=Union(v, Sphere(p,vec3(20,20,b-5.),1.,6));
+   v=Union(v,Capsule(vec3(10,-10,10),vec3(20,20,b-5.),0.2,p,-1));
+  
+ 
+  return v;
+}
+
+// Analysis of the scalar field --------------------------------------------------------------------------
+
+// Calculate object normal
+// p : point
+vec3 ObjectNormal(in vec3 p )
+{
+  float eps = 0.001;
+  vec3 n;
+  V vp = object(p);
+    float v = vp.v;
+  n.x = object( vec3(p.x+eps, p.y, p.z) ).v - v;
+  n.y = object( vec3(p.x, p.y+eps, p.z) ).v - v;
+  n.z = object( vec3(p.x, p.y, p.z+eps) ).v - v;
+  return normalize(n);
+}
+
+// Trace ray using ray marching
+// o : ray origin
+// u : ray direction
+// e : Maximum distance 
+// h : hit
+// s : Number of steps
+float SphereTrace(vec3 o, vec3 u, float e,out bool h,out int s)
+{
+  h = false;
+
+    // Start at the origin
+    float t=0.0;
+
+  for(int i=0; i<Steps; i++)
+  {
+    s=i;
+    vec3 p = o+t*u;
+    float v = object(p).v;
+    // Hit object
+      if (v < 0.0)
+      {
+          s=i;
+          h = true;
+          break;
+      }
+      // Move along ray
+      t += max(Epsilon,v);
+      // Escape marched too far away
+      if (t>e)
+      {
+          break;
+      }
+  }
+  return t;
+}
+
+// Background color
+// d : Ray direction
+vec3 background(vec3 d)
+{
+  return mix(vec3(0.65,0.75,0.995),vec3(0.652,0.697,0.995), d.z*0.5+0.5);
+}
+
+
+// Direct lighting
+float Light(vec3 p,vec3 n)
+{
+   // point light
+  const vec3 lp = vec3(5.0, 10.0, 25.0);
+
+  vec3 l = normalize(lp - p);
+
+  // Phong shading
+  float diff = clamp(dot(n, l),0.0,1.0);
+
+    bool h;
+    int s;
+    float t=SphereTrace(p+0.1*n,l,100.0,h,s);
+if (!h)
+    {
+     return diff;
+    }
+    return 0.0; 
+}
+
+
+// cercleConcentrique
+// float : ecart
+// float d : direction
+float cercle(float e, float d)
+{
+    return (1.+sin((2.*3.14*d)/e))*(1./2.);
+}
+
+
+//boisLisse 
+// vec3 p : objet
+// float e : ecart 
+// float dir : vecteur pour faire la direction des bandes
+vec3 eau(vec3 p)
+{
+    float s = Noise(p); 
+    if (s > 0.5)
+    {  
+        return vec3 ((99./255.)+s,(239./255.)+s,(232./255.)+s);
+    }
+    
+    else {return vec3 (114./255.+s,205./255.+s, 224./255.+s);} 
+}
+
+
+//checker
+int Checker(float x, float y, float z)
+{
+    return abs((int(x) + int(y) + int(z))%2);
+}
+
+// damier
+// vec3 p : objet
+vec3 damier(vec3 p)
+{
+    bool dec = Checker(p.x, p.y, p.z) > 0;
+    if (p.x<0.){dec = !dec;}
+    if (p.y<0.){dec = !dec;}
+    if (p.z<0.){dec = !dec;}
+    if(dec){return vec3(0.,0.,0.);}
+    else{return vec3(1.,1.,1.);}  
+}
+
+vec3 arbre1(vec3 p)
+{
+    
+    if(Noise(p)>0.5){return vec3 (160./255.,105./255.,101./255.);}
+    else{return vec3 (105./255.,50./255.,45./255.);}
+}
+
+//if(Noise(p)>0.5){return vec3 (37./255., 173./255., 40./255.);}
+    //else{return vec3 (86./255., 228./255., 115./255.);}
+
+vec3 sable(vec3 p)
+{
+    
+    if(NoiseSable(p)>0.5){return vec3 (200./255., 162./255., 111./255.);} 
+    else{return vec3 (1., 237./255., 174./255.);}
+}
+
+vec3 nuages(vec3 p)
+{
+    float t = Nuage(p)*1.5+0.3;
+    
+    return vec3(t+0.60);
+}
+
+
+vec3 couleurs(vec3 p)
+{
+    float t = Nuage(p)*1.5+0.3;
+    vec3 s = vec3(sin(p)); 
+    /*t = t + NoiseNuages(p*16.)*0.25;
+    t = t + NoiseNuages(p*32.)*0.125;
+    t = NoiseNuages(p*64.)*0.0625;*/
+   // t = t/2.;
+    return vec3(t+s);
+}
+
+
+vec3 arbre2(vec3 p)
+{
+    if(NoiseArbre(p)>0.5){return vec3 (140./255.,100./255.,85./255.);} 
+    else{return vec3 (105./255.,70./255.,45./255.);}
+} 
+
+
+
+// Shading and lighting ---------------------------------------------------------------------------
+
+
+T Texture3(in vec3 p)
+{
+  return T(vec3(0.82,0.91,0.80),0.0);
+}
+
+T Texture5 (in vec3 p)
+{
+    return T(eau(p), 0.4);
+}
+
+T Texture6 (in vec3 p)
+{
+    return T(damier(p), 0.23);
+}
+
+T Texture7 (in vec3 p)
+{
+    return T (arbre1(p), 1.);
+}
+
+T Texture8 (in vec3 p)
+{
+    return T (sable(p), 0.0);
+}
+
+T Texture9 (in vec3 p)
+{
+    return T(nuages(p), 0.0);
+}
+
+T Texture2(in vec3 p)
+{
+  return T(arbre2(p),0.0);   
+}
+
+T Texture10 (in vec3 p)
+{
+    return T(couleurs(p), 0.9);
+}
+
+// Compute texture 
+// p : Point
+// n : Normal
+T Color(in vec3 p,in vec3 n)
+{
+    V vp= object(p);
+    if (vp.i==0){
+        
+        return Texture6(p);
+    }
+    else if (vp.i==1)
+    {
+        return Texture7(p);
+    }
+    else if (vp.i==2)
+    {
+        return Texture2(p);
+    }
+    else if (vp.i==3)
+    {
+        return Texture5(p);
+    }
+    else if (vp.i==4)
+    {
+        return Texture8(p);
+    }
+    else if (vp.i==5)
+    {
+        return Texture9(p);
+    }
+    else if (vp.i==6)
+    {
+        return Texture10(p);
+    }
+}
+
+// Shadowing
+// p : Point
+// n : Normal
+// l : Light direction
+float Shadow(vec3 p,vec3 n,vec3 l)
+{
+    bool h;
+    int s;
+    float t = SphereTrace(p,l,100.0,h,s);
+    if (!h)
+    {
+     return 1.0;
+    }
+    return 0.0; 
+}
+
+// Shading and lighting
+// p : Point
+// n : Normal at point
+// e : Eye direction
+vec3 Shade(vec3 p, vec3 n, vec3 e)
+{
+     // Point light
+    const vec3 lp = vec3(5.0, 10.0, 25.0);
+    
+    // Light direction to point light
+    vec3 l = normalize(lp - p);
+
+    T tex=Color(p,n);
+
+    // Ambient color
+    vec3 ambient = 0.5*tex.c;
+        
+    // Shadow computation
+    float s = Shadow(p+0.01*n,n,l);
+
+// Phong diffuse
+    vec3 diffuse = clamp(dot(n, l),0.0,1.0) * tex.c;
+
+    // Specular
+    vec3 r = reflect(e,n);
+    vec3 specular = tex.s * pow(clamp(dot(r,l),0.0,1.0),28.0) * vec3(1.0,1.0,1.0);
+    vec3 c = ambient + s * (diffuse + specular);
+    return c;
+}
+
+// Picture in picture ------------------------------------------------------------------------------
+
+// Shading according to the number of steps in sphere tracing
+// n : Number of steps
+vec3 ShadeSteps(int n)
+{
+   float t=float(n)/(float(Steps-1));
+   return 0.5+mix(vec3(0.05,0.05,0.5),vec3(0.65,0.39,0.65),t);
+}
+
+// Picture in picture
+// pixel : Pixel
+// pip : Boolean, true if pixel was in sub-picture zone
+vec2 Pip(in vec2 pixel, out bool pip)
+{
+    // Pixel coordinates
+    vec2 p = (-iResolution.xy + 2.0*pixel)/iResolution.y;
+   if (pip==true)
+   {    
+    const float fraction=1.0/4.0;
+    // Recompute pixel coordinates in sub-picture
+    if ((pixel.x<iResolution.x*fraction) && (pixel.y<iResolution.y*fraction))
+    {
+        p=(-iResolution.xy*fraction + 2.0*pixel)/(iResolution.y*fraction);
+        pip=true;
+    }
+       else
+       {
+           pip=false;
+       }
+   }
+   return p;
+}
+
+
+// Image
+void mainImage( out vec4 color, in vec2 pxy )
+{
+    // Picture in picture on
+    bool pip=true;
+    
+   // Pixel
+     vec2 pixel=Pip(pxy, pip);
+    
+    // Mouse
+    vec2 m=iMouse.xy/iResolution.xy;
+
+    // Camera
+    vec3 ro,rd;
+    Ray(m,pixel,ro,rd);
+
+  // Trace ray
+
+  // Hit and number of steps
+  bool hit;
+  int s;
+
+  float t = SphereTrace(ro, rd, 100.0,hit, s);
+  
+    // Position 
+    vec3 pt = ro + t * rd;
+    
+  // Shade background
+  vec3 rgb = background(rd);
+
+  if (hit)
+  {
+    // Compute normal
+    vec3 n = ObjectNormal(pt);
+
+    // Shade object with light
+    rgb = Shade(pt, n, rd);
+  }
+
+  // Uncomment this line to shade image with false colors representing the number of steps
+  if (pip==true)
+  {
+      rgb = ShadeSteps(s); 
+  }
+
+
+  color=vec4(rgb, 1.0);
+}
+

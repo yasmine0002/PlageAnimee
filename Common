@@ -1,0 +1,185 @@
+// Texturing and noise 
+
+// Hashing function
+// Returns a random number in [-1,1]
+// p : Vector in space
+
+
+
+float Hash(in vec3 p)  
+{
+    p  = fract( p*0.3199+0.152 );
+	p *= 17.;
+    return fract( p.x*p.y*p.z*(p.x+p.y+p.z) );
+}
+
+vec4 Hash4(in vec4 p)  //Hash pour vec4 directement
+{
+    return fract (sin(vec4(1.0,7.0,13.0,31.0)*dot(p, vec4(113.989, 441.423,993.222,312.657))))*vec4(43758.5453);
+}
+
+/*
+
+float Hash(in vec3 p)  
+{
+    p  = fract( p*0.3199+0.152 );
+	p *= 1.;
+    return fract( p.x*p.y*p.z*(p.x+p.y+p.z) );
+}
+
+*/
+
+/*
+float Hash(in vec3 p)  
+{
+    p  = fract( p*0.3199+0.152 );
+	p *= 80.0;
+    return fract( p.x*p.y*p.z*(p.x+p.y+p.z) );
+}
+*/
+
+
+
+// Procedural value noise with cubic interpolation
+// x : Point 
+float Noise(in vec3 p)
+{
+    vec3 i = floor(p);
+    vec3 f = fract(p);
+  
+    f = f*f*(3.0-2.0*f);
+    // Could use quintic interpolation instead of cubic
+    // f = f*f*f*(f*(f*6.0-15.0)+10.0);
+
+    return mix(mix(mix( Hash(i+vec3(0,0,0)), 
+                        Hash(i+vec3(1,0,0)),f.x),
+                   mix( Hash(i+vec3(0,1,0)), 
+                        Hash(i+vec3(1,1,0)),f.x),f.y),
+               mix(mix( Hash(i+vec3(0,0,1)), 
+                        Hash(i+vec3(1,0,1)),f.x),
+                   mix( Hash(i+vec3(0,1,1)), 
+                        Hash(i+vec3(1,1,1)),f.x),f.y),f.z);
+}
+
+
+
+float NoiseSable(in vec3 p)
+{               
+    return fract(sin(p.x*100.+p.y*1000.+p.z*100.)*6000.);
+}
+
+float NoiseNuages(in vec3 p)
+{
+    vec3 i = floor(p);
+    vec3 f = (0.,1.,fract(p));
+  
+    f = f*f*(3.0-2.0*f);
+    
+    float hg = NoiseSable(i);
+    float hd = NoiseSable(i + vec3(1,0,0));
+    float hz = NoiseSable(i + vec3(0,0,1));
+    float h = mix(mix(hg, mix(hd,hz, f.x),f.x),mix(hd, mix(hd,hz, f.x), f.x),f.x);
+    
+    float vg = NoiseSable(i+vec3(0,1,0));
+    float vd = NoiseSable(i + vec3(1,1,0));
+    float vz = NoiseSable(i + vec3(0,1,1));
+    float v = mix(mix(vg, mix(vd,vz, f.x),f.x),mix(vd, mix(vd,vz, f.x), f.x),f.x);
+    
+    return mix(mix(h, v, f.y),mix(v, h, f.y),f.y);
+}
+
+
+
+float Nuage(in vec3 p)
+{
+    vec3 i = floor(p);
+    vec3 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    
+    float n = i.x + i.y * 157.0 + 113.0 * i.z;
+    return mix(mix(mix(Hash (vec3 (n + 0.0)), 
+    Hash (vec3(n + 1.0)), f.x),
+                   mix(Hash(vec3 (n + 157.0)), Hash(vec3 (n + 158.0)), f.x), f.y),
+               mix(mix(Hash(vec3(n + 113.0)), Hash(vec3 (n + 114.0)), f.x),
+                   mix(Hash(vec3(n + 270.0)), Hash(vec3(n + 271.0)), f.x), f.y), f.z);
+}
+
+
+float NoiseArbre( in vec3 x ) 
+{
+    vec3 p = floor(x); 
+    vec3 f = fract(x);
+    f = f*f*(3.0-2.0*f);
+    vec4 v = vec4(p.x,p.x+1.0,p.x,p.x+1.0); 
+    vec4 y = vec4(p.y,p.y,p.y+1.0,p.y+1.0); 
+    vec4 z = vec4(p.z,p.z,p.z,p.z+1.0); 
+    vec4 h = Hash4(v*0.987+y*3.456+z*7.891); 
+    vec4 n = h*vec4(0,1,0,1) + dot(vec4(f.x,f.x-1.,f.x,f.x-1.),vec4(f.y,f.y,f.y-1.,f.y-1.))*vec4(h.z,h.w,h.z,h.w);
+    return dot(vec4(0.25),n); 
+}
+
+
+
+
+
+// Compute the distance to the Voronoi boundary
+// x : Point
+// Return (closest distance, second closest, cell id)
+vec3 Voronoi( in vec3 x )
+{
+    vec3 p = floor( x );
+    vec3 f = fract( x );
+
+	float id = 0.0;
+    vec2 res = vec2( 100.0 );
+    for( int k=-1; k<=1; k++ )
+    for( int j=-1; j<=1; j++ )
+    for( int i=-1; i<=1; i++ )
+    {
+        vec3 b = vec3( float(i), float(j), float(k) );
+        vec3 r = vec3( b ) - f + Hash( p + b );
+        float d = dot( r, r );
+
+        if( d < res.x )
+        {
+			id = dot( p+b, vec3(1.0,57.0,113.0 ) );
+            res = vec2( d, res.x );			
+        }
+        else if( d < res.y )
+        {
+            res.y = d;
+        }
+    }
+
+    return vec3( sqrt( res ), abs(id) );
+}
+
+// Camera -----------------------------------------------------------------------
+
+// Rotation matrix around z axis
+// a : Angle
+mat3 Rz(float a)
+{
+    float sa = sin(a); float ca = cos(a); 
+    return mat3(ca,sa,0.0,    -sa,ca,0.0,  0.0,0.0,1.0);
+}
+
+// Compute the ray
+//      m : Mouse position
+//      p : Pixel
+// ro, rd : Ray origin and direction
+void Ray(in vec2 m, in vec2 p,out vec3 ro,out vec3 rd)
+{
+    float a = 3.0*3.14*m.x;
+   	float le = 3.8;
+    
+    ro=vec3(60.0,0.0,10.0);
+    ro*=Rz(3.0*3.14*m.x); 
+
+    vec3 ta = vec3(0.0,0.0,0.0);
+    vec3 ww = normalize( ta - ro );
+    vec3 uu = normalize( cross(ww,vec3(0.0,0.0,1.0) ) );
+    vec3 vv = normalize( cross(uu,ww));
+	rd = normalize( p.x*uu + p.y*vv + le*ww );
+}
+
